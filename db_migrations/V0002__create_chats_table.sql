@@ -1,0 +1,8 @@
+CREATE TABLE chats (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255),
+    chat_type VARCHAR(20) NOT NULL,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
