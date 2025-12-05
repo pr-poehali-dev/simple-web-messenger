@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useState, useEffect } from 'react';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -10,80 +10,214 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import Icon from '@/components/ui/icon';
+import { useToast } from '@/hooks/use-toast';
 
-interface Message {
-  id: number;
-  text: string;
-  time: string;
-  sender: 'me' | 'other';
-}
+const API_URLS = {
+  chats: 'https://functions.poehali.dev/f2668559-13a9-4b90-ac58-eb2bd853460b',
+  messages: 'https://functions.poehali.dev/e2784f5a-53da-45ff-97c1-3c5bbb73f589',
+  users: 'https://functions.poehali.dev/827d873a-0ab9-4bb2-a9e2-3d79b05d7d9b',
+  calls: 'https://functions.poehali.dev/7c010735-4ca6-4822-b2cd-352b250e745a',
+};
+
+const CURRENT_USER_ID = 1;
 
 interface Chat {
   id: number;
-  name: string;
-  avatar: string;
-  lastMessage: string;
-  time: string;
-  unread: number;
-  online: boolean;
+  display_name: string;
+  last_message: string;
+  last_message_time: string;
+  unread_count: number;
+  other_user_status: string;
+  chat_type: string;
 }
 
-interface Notification {
+interface Message {
   id: number;
-  type: 'message' | 'call' | 'system';
-  title: string;
-  description: string;
-  time: string;
-  read: boolean;
+  content: string;
+  created_at: string;
+  sender_id: number;
+  sender_name: string;
+  message_type: string;
+  duration?: number;
+}
+
+interface User {
+  id: number;
+  full_name: string;
+  email: string;
+  position: string;
+  department: string;
+  phone: string;
+  bio: string;
+  status: string;
+}
+
+interface CallHistory {
+  id: number;
+  call_type: string;
+  status: string;
+  started_at: string;
+  duration: number;
+  initiator_name: string;
+  chat_name: string;
 }
 
 const Index = () => {
-  const [activeTab, setActiveTab] = useState<'chats' | 'profile' | 'settings' | 'notifications'>('chats');
-  const [selectedChat, setSelectedChat] = useState<number | null>(1);
+  const [activeTab, setActiveTab] = useState<'chats' | 'profile' | 'settings' | 'notifications' | 'calls'>('chats');
+  const [selectedChat, setSelectedChat] = useState<number | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [isVideoCall, setIsVideoCall] = useState(false);
+  const [isConference, setIsConference] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [callHistory, setCallHistory] = useState<CallHistory[]>([]);
+  const [conferenceParticipants, setConferenceParticipants] = useState<string[]>([]);
+  
+  const { toast } = useToast();
 
-  const chats: Chat[] = [
-    { id: 1, name: 'Анна Петрова', avatar: '', lastMessage: 'Отправила файлы по проекту', time: '14:30', unread: 2, online: true },
-    { id: 2, name: 'Команда разработки', avatar: '', lastMessage: 'Дмитрий: Созвон в 15:00', time: '13:45', unread: 5, online: true },
-    { id: 3, name: 'Иван Сергеев', avatar: '', lastMessage: 'Согласовал бюджет', time: '12:20', unread: 0, online: false },
-    { id: 4, name: 'Мария Коваленко', avatar: '', lastMessage: 'Когда встреча?', time: '11:15', unread: 1, online: true },
-    { id: 5, name: 'Отдел маркетинга', avatar: '', lastMessage: 'Новая кампания готова', time: 'Вчера', unread: 0, online: false },
-  ];
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+    loadChats();
+    loadCurrentUser();
+    loadCallHistory();
+  }, []);
 
-  const messages: Message[] = [
-    { id: 1, text: 'Добрый день! Отправляю документы по новому проекту', time: '14:25', sender: 'other' },
-    { id: 2, text: 'Спасибо, изучу', time: '14:27', sender: 'me' },
-    { id: 3, text: 'Отправила файлы по проекту', time: '14:30', sender: 'other' },
-  ];
+  useEffect(() => {
+    if (selectedChat) {
+      loadMessages(selectedChat);
+    }
+  }, [selectedChat]);
 
-  const notifications: Notification[] = [
-    { id: 1, type: 'message', title: 'Новое сообщение', description: 'Анна Петрова: Отправила файлы', time: '5 мин назад', read: false },
-    { id: 2, type: 'call', title: 'Пропущенный звонок', description: 'Команда разработки', time: '15 мин назад', read: false },
-    { id: 3, type: 'message', title: 'Новое сообщение', description: 'Мария Коваленко: Когда встреча?', time: '1 час назад', read: true },
-    { id: 4, type: 'system', title: 'Обновление системы', description: 'Доступна новая версия', time: '2 часа назад', read: true },
-  ];
+  const loadChats = async () => {
+    try {
+      const response = await fetch(`${API_URLS.chats}?user_id=${CURRENT_USER_ID}`);
+      const data = await response.json();
+      setChats(data);
+      if (data.length > 0 && !selectedChat) {
+        setSelectedChat(data[0].id);
+      }
+    } catch (error) {
+      console.error('Error loading chats:', error);
+    }
+  };
 
-  const sendMessage = () => {
-    if (messageInput.trim()) {
+  const loadMessages = async (chatId: number) => {
+    try {
+      const response = await fetch(`${API_URLS.messages}?chat_id=${chatId}`);
+      const data = await response.json();
+      setMessages(data);
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    }
+  };
+
+  const loadCurrentUser = async () => {
+    try {
+      const response = await fetch(`${API_URLS.users}?id=${CURRENT_USER_ID}`);
+      const data = await response.json();
+      setCurrentUser(data);
+    } catch (error) {
+      console.error('Error loading user:', error);
+    }
+  };
+
+  const loadCallHistory = async () => {
+    try {
+      const response = await fetch(`${API_URLS.calls}?user_id=${CURRENT_USER_ID}`);
+      const data = await response.json();
+      setCallHistory(data);
+    } catch (error) {
+      console.error('Error loading call history:', error);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!messageInput.trim() || !selectedChat) return;
+
+    try {
+      await fetch(API_URLS.messages, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: selectedChat,
+          sender_id: CURRENT_USER_ID,
+          content: messageInput,
+          message_type: 'text',
+        }),
+      });
+      
       setMessageInput('');
+      loadMessages(selectedChat);
+      loadChats();
+    } catch (error) {
+      console.error('Error sending message:', error);
+      toast({ title: 'Ошибка отправки сообщения', variant: 'destructive' });
     }
   };
 
   const startVideoCall = () => {
     setIsVideoCall(true);
+    setIsConference(false);
+    setConferenceParticipants([]);
+  };
+
+  const startConference = () => {
+    setIsVideoCall(true);
+    setIsConference(true);
+    setConferenceParticipants(['Анна Петрова', 'Дмитрий Соколов', 'Мария Коваленко']);
   };
 
   const endVideoCall = () => {
     setIsVideoCall(false);
+    setIsConference(false);
+    setConferenceParticipants([]);
   };
+
+  const toggleVoiceRecording = async () => {
+    if (!isRecordingVoice) {
+      setIsRecordingVoice(true);
+      toast({ title: 'Запись голосового сообщения...' });
+    } else {
+      setIsRecordingVoice(false);
+      if (selectedChat) {
+        await fetch(API_URLS.messages, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: selectedChat,
+            sender_id: CURRENT_USER_ID,
+            content: 'Голосовое сообщение',
+            message_type: 'voice',
+            duration: 15,
+          }),
+        });
+        loadMessages(selectedChat);
+        toast({ title: 'Голосовое сообщение отправлено' });
+      }
+    }
+  };
+
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const selectedChatData = chats.find(c => c.id === selectedChat);
 
   return (
     <div className="flex h-screen bg-background">
-      {/* Sidebar */}
       <div className="w-20 bg-sidebar flex flex-col items-center py-6 space-y-8">
         <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold">
-          M
+          {currentUser?.full_name.charAt(0) || 'M'}
         </div>
         
         <nav className="flex-1 flex flex-col space-y-6">
@@ -99,10 +233,10 @@ const Index = () => {
           <Button
             variant="ghost"
             size="icon"
-            className={`w-12 h-12 ${activeTab === 'notifications' ? 'bg-sidebar-accent' : ''}`}
-            onClick={() => setActiveTab('notifications')}
+            className={`w-12 h-12 ${activeTab === 'calls' ? 'bg-sidebar-accent' : ''}`}
+            onClick={() => setActiveTab('calls')}
           >
-            <Icon name="Bell" size={24} />
+            <Icon name="Phone" size={24} />
           </Button>
           
           <Button
@@ -125,10 +259,8 @@ const Index = () => {
         </nav>
       </div>
 
-      {/* Main Content */}
       {activeTab === 'chats' && (
         <>
-          {/* Chat List */}
           <div className="w-80 border-r border-border bg-card">
             <div className="p-4 space-y-4">
               <div className="flex items-center justify-between">
@@ -156,23 +288,24 @@ const Index = () => {
                   <div className="flex items-center space-x-3">
                     <div className="relative">
                       <Avatar>
-                        <AvatarImage src={chat.avatar} />
-                        <AvatarFallback>{chat.name.charAt(0)}</AvatarFallback>
+                        <AvatarFallback>{chat.display_name.charAt(0)}</AvatarFallback>
                       </Avatar>
-                      {chat.online && (
+                      {chat.other_user_status === 'online' && (
                         <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-card" />
                       )}
                     </div>
                     
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <p className="font-medium truncate">{chat.name}</p>
-                        <span className="text-xs text-muted-foreground">{chat.time}</span>
+                        <p className="font-medium truncate">{chat.display_name}</p>
+                        <span className="text-xs text-muted-foreground">
+                          {chat.last_message_time ? formatTime(chat.last_message_time) : ''}
+                        </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
-                        {chat.unread > 0 && (
-                          <Badge className="ml-2">{chat.unread}</Badge>
+                        <p className="text-sm text-muted-foreground truncate">{chat.last_message || 'Нет сообщений'}</p>
+                        {chat.unread_count > 0 && (
+                          <Badge className="ml-2">{chat.unread_count}</Badge>
                         )}
                       </div>
                     </div>
@@ -182,20 +315,20 @@ const Index = () => {
             </ScrollArea>
           </div>
 
-          {/* Chat Window */}
           {!isVideoCall ? (
             <div className="flex-1 flex flex-col">
-              {selectedChat && (
+              {selectedChat && selectedChatData && (
                 <>
-                  {/* Chat Header */}
                   <div className="h-16 border-b border-border px-6 flex items-center justify-between bg-card">
                     <div className="flex items-center space-x-3">
                       <Avatar>
-                        <AvatarFallback>АП</AvatarFallback>
+                        <AvatarFallback>{selectedChatData.display_name.charAt(0)}</AvatarFallback>
                       </Avatar>
                       <div>
-                        <p className="font-medium">Анна Петрова</p>
-                        <p className="text-xs text-muted-foreground">В сети</p>
+                        <p className="font-medium">{selectedChatData.display_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {selectedChatData.other_user_status === 'online' ? 'В сети' : 'Не в сети'}
+                        </p>
                       </div>
                     </div>
                     
@@ -203,8 +336,8 @@ const Index = () => {
                       <Button size="icon" variant="ghost" onClick={startVideoCall}>
                         <Icon name="Video" size={20} />
                       </Button>
-                      <Button size="icon" variant="ghost">
-                        <Icon name="Phone" size={20} />
+                      <Button size="icon" variant="ghost" onClick={startConference}>
+                        <Icon name="Users" size={20} />
                       </Button>
                       <Button size="icon" variant="ghost">
                         <Icon name="MoreVertical" size={20} />
@@ -212,34 +345,47 @@ const Index = () => {
                     </div>
                   </div>
 
-                  {/* Messages */}
                   <ScrollArea className="flex-1 p-6">
                     <div className="space-y-4">
                       {messages.map((message) => (
                         <div
                           key={message.id}
-                          className={`flex ${message.sender === 'me' ? 'justify-end' : 'justify-start'}`}
+                          className={`flex ${message.sender_id === CURRENT_USER_ID ? 'justify-end' : 'justify-start'}`}
                         >
                           <div
                             className={`max-w-[70%] rounded-lg p-3 ${
-                              message.sender === 'me'
+                              message.sender_id === CURRENT_USER_ID
                                 ? 'bg-primary text-primary-foreground'
                                 : 'bg-card border border-border'
                             }`}
                           >
-                            <p>{message.text}</p>
-                            <p className="text-xs mt-1 opacity-70">{message.time}</p>
+                            {message.message_type === 'voice' ? (
+                              <div className="flex items-center space-x-2">
+                                <Icon name="Mic" size={16} />
+                                <span>Голосовое сообщение</span>
+                                {message.duration && <span className="text-xs">({message.duration}с)</span>}
+                              </div>
+                            ) : (
+                              <p>{message.content}</p>
+                            )}
+                            <p className="text-xs mt-1 opacity-70">{formatTime(message.created_at)}</p>
                           </div>
                         </div>
                       ))}
                     </div>
                   </ScrollArea>
 
-                  {/* Message Input */}
                   <div className="border-t border-border p-4 bg-card">
                     <div className="flex items-center space-x-2">
                       <Button size="icon" variant="ghost">
                         <Icon name="Paperclip" size={20} />
+                      </Button>
+                      <Button 
+                        size="icon" 
+                        variant={isRecordingVoice ? 'destructive' : 'ghost'}
+                        onClick={toggleVoiceRecording}
+                      >
+                        <Icon name="Mic" size={20} />
                       </Button>
                       <Input
                         placeholder="Введите сообщение..."
@@ -261,15 +407,38 @@ const Index = () => {
             </div>
           ) : (
             <div className="flex-1 bg-black relative">
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center text-white">
-                  <Avatar className="w-32 h-32 mx-auto mb-4">
-                    <AvatarFallback className="text-4xl">АП</AvatarFallback>
-                  </Avatar>
-                  <h2 className="text-2xl font-semibold mb-2">Анна Петрова</h2>
-                  <p className="text-gray-400">Видеозвонок...</p>
+              {isConference ? (
+                <div className="grid grid-cols-2 gap-4 p-8 h-full">
+                  {conferenceParticipants.map((participant, idx) => (
+                    <div key={idx} className="bg-gray-800 rounded-lg flex items-center justify-center relative">
+                      <Avatar className="w-24 h-24">
+                        <AvatarFallback className="text-3xl">{participant.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <div className="absolute bottom-4 left-4 text-white font-medium">
+                        {participant}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="bg-gray-900 rounded-lg flex items-center justify-center relative border-2 border-primary">
+                    <Avatar className="w-24 h-24">
+                      <AvatarFallback className="text-3xl">{currentUser?.full_name.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <div className="absolute bottom-4 left-4 text-white font-medium">
+                      Вы
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center text-white">
+                    <Avatar className="w-32 h-32 mx-auto mb-4">
+                      <AvatarFallback className="text-4xl">{selectedChatData?.display_name.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <h2 className="text-2xl font-semibold mb-2">{selectedChatData?.display_name}</h2>
+                    <p className="text-gray-400">Видеозвонок...</p>
+                  </div>
+                </div>
+              )}
 
               <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center space-x-4">
                 <Button size="icon" variant="secondary" className="w-14 h-14 rounded-full">
@@ -294,25 +463,83 @@ const Index = () => {
                 </Button>
               </div>
 
-              <div className="absolute top-4 right-4 w-48 h-36 bg-gray-800 rounded-lg border-2 border-gray-600">
-                <div className="w-full h-full flex items-center justify-center text-white">
-                  <Icon name="User" size={48} />
+              {!isConference && (
+                <div className="absolute top-4 right-4 w-48 h-36 bg-gray-800 rounded-lg border-2 border-gray-600">
+                  <div className="w-full h-full flex items-center justify-center text-white">
+                    <Avatar className="w-16 h-16">
+                      <AvatarFallback>{currentUser?.full_name.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </>
       )}
 
-      {activeTab === 'profile' && (
+      {activeTab === 'calls' && (
+        <div className="flex-1 p-8 overflow-auto">
+          <div className="max-w-3xl mx-auto">
+            <h1 className="text-3xl font-semibold mb-8">История звонков</h1>
+            
+            <div className="space-y-2">
+              {callHistory.map((call) => (
+                <Card key={call.id} className="p-4 hover:bg-accent/50 transition-colors cursor-pointer">
+                  <div className="flex items-center space-x-4">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                      call.status === 'missed' ? 'bg-destructive/10' : 'bg-primary/10'
+                    }`}>
+                      <Icon 
+                        name={call.status === 'missed' ? 'PhoneMissed' : call.call_type === 'video' ? 'Video' : 'Phone'} 
+                        size={24}
+                        className={call.status === 'missed' ? 'text-destructive' : 'text-primary'}
+                      />
+                    </div>
+                    
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="font-medium">{call.initiator_name}</p>
+                        <span className="text-xs text-muted-foreground">
+                          {formatTime(call.started_at)}
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                        <span className="capitalize">{call.call_type === 'video' ? 'Видеозвонок' : 'Аудиозвонок'}</span>
+                        {call.duration > 0 && (
+                          <>
+                            <span>•</span>
+                            <span>{formatDuration(call.duration)}</span>
+                          </>
+                        )}
+                        {call.status === 'missed' && (
+                          <>
+                            <span>•</span>
+                            <span className="text-destructive">Пропущен</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <Button size="icon" variant="ghost">
+                      <Icon name="Phone" size={20} />
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'profile' && currentUser && (
         <div className="flex-1 flex items-center justify-center p-8">
           <Card className="w-full max-w-2xl p-8">
             <div className="text-center mb-8">
               <Avatar className="w-32 h-32 mx-auto mb-4">
-                <AvatarFallback className="text-4xl">МИ</AvatarFallback>
+                <AvatarFallback className="text-4xl">{currentUser.full_name.charAt(0)}</AvatarFallback>
               </Avatar>
-              <h2 className="text-2xl font-semibold mb-2">Михаил Иванов</h2>
-              <p className="text-muted-foreground">m.ivanov@company.com</p>
+              <h2 className="text-2xl font-semibold mb-2">{currentUser.full_name}</h2>
+              <p className="text-muted-foreground">{currentUser.email}</p>
             </div>
 
             <Separator className="my-6" />
@@ -321,31 +548,32 @@ const Index = () => {
               <div>
                 <Label className="text-sm font-medium mb-2 block">Статус</Label>
                 <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full" />
-                  <span>В сети</span>
+                  <div className={`w-3 h-3 rounded-full ${
+                    currentUser.status === 'online' ? 'bg-green-500' : 
+                    currentUser.status === 'away' ? 'bg-yellow-500' : 'bg-gray-500'
+                  }`} />
+                  <span className="capitalize">{currentUser.status === 'online' ? 'В сети' : currentUser.status === 'away' ? 'Не на месте' : 'Не в сети'}</span>
                 </div>
               </div>
 
               <div>
                 <Label className="text-sm font-medium mb-2 block">Должность</Label>
-                <p>Руководитель отдела разработки</p>
+                <p>{currentUser.position}</p>
               </div>
 
               <div>
                 <Label className="text-sm font-medium mb-2 block">Отдел</Label>
-                <p>Разработка продукта</p>
+                <p>{currentUser.department}</p>
               </div>
 
               <div>
                 <Label className="text-sm font-medium mb-2 block">Телефон</Label>
-                <p>+7 (999) 123-45-67</p>
+                <p>{currentUser.phone}</p>
               </div>
 
               <div>
                 <Label className="text-sm font-medium mb-2 block">О себе</Label>
-                <p className="text-muted-foreground">
-                  Опыт в разработке корпоративных систем более 8 лет. Специализируюсь на архитектуре и управлении командой.
-                </p>
+                <p className="text-muted-foreground">{currentUser.bio}</p>
               </div>
 
               <Button className="w-full">Редактировать профиль</Button>
@@ -461,7 +689,7 @@ const Index = () => {
                         <Label>Темная тема</Label>
                         <p className="text-sm text-muted-foreground">Использовать темное оформление</p>
                       </div>
-                      <Switch />
+                      <Switch defaultChecked />
                     </div>
                     <Separator />
                     <div>
@@ -476,59 +704,6 @@ const Index = () => {
                 </Card>
               </TabsContent>
             </Tabs>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'notifications' && (
-        <div className="flex-1 p-8 overflow-auto">
-          <div className="max-w-3xl mx-auto">
-            <div className="flex items-center justify-between mb-8">
-              <h1 className="text-3xl font-semibold">Уведомления</h1>
-              <Button variant="outline" size="sm">
-                <Icon name="CheckCheck" size={16} className="mr-2" />
-                Прочитать все
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              {notifications.map((notif) => (
-                <Card
-                  key={notif.id}
-                  className={`p-4 cursor-pointer hover:bg-accent/50 transition-colors ${
-                    !notif.read ? 'border-l-4 border-l-primary' : ''
-                  }`}
-                >
-                  <div className="flex items-start space-x-4">
-                    <div className="mt-1">
-                      {notif.type === 'message' && (
-                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                          <Icon name="MessageSquare" size={20} className="text-primary" />
-                        </div>
-                      )}
-                      {notif.type === 'call' && (
-                        <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center">
-                          <Icon name="PhoneMissed" size={20} className="text-destructive" />
-                        </div>
-                      )}
-                      {notif.type === 'system' && (
-                        <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                          <Icon name="Info" size={20} />
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-medium">{notif.title}</h3>
-                        <span className="text-xs text-muted-foreground">{notif.time}</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground">{notif.description}</p>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
           </div>
         </div>
       )}

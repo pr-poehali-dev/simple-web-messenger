@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "name": "Get call history",
+      "method": "GET",
+      "path": "/?user_id=1",
+      "expectedStatus": 200,
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Create new call",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "chat_id": 1,
+        "initiator_id": 1,
+        "call_type": "video"
+      },
+      "expectedStatus": 201,
+      "bodyMatcher": "partial"
+    }
+  ]
+}
